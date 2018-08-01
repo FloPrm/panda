@@ -9,7 +9,7 @@ defmodule Panda do
 
   ## Examples
 
-      iex> PandascoreTechTest.upcoming_matches
+      iex> Panda.upcoming_matches
       [
         %{"begin_at" => "2018-08-01T08:00:00Z", "id" => 49634, "name" => "BBQ-vs-GEN"},
         %{"begin_at" => "2018-08-01T09:00:00Z", "id" => 50149, "name" => "CR vs VG"},
@@ -26,6 +26,59 @@ defmodule Panda do
     for match <- full_matches do
       %{"begin_at" => match["begin_at"], "id" => match["id"], "name" => match["name"]}
     end
+  end
+
+  @doc """
+  Odds for match
+  Computes each opponent's chances of victory in an upcoming match based on previous tournaments results
+
+  Reasoning used is coming from this article : https://sabr.org/research/probabilities-victory-head-head-team-matchups
+
+  ## Examples
+
+      iex> Panda.odds_for_match(49634)
+      %{"Gen.G" => 80.0, "bbq OLIVERS" => 20.0}
+  """
+  def odds_for_match(match_id) do
+    response = HTTPotion.get "https://api.pandascore.co/matches/upcoming.json?token=#{Application.fetch_env!(:panda, :api_key)}"
+    {:ok, all_matches} = Poison.decode(response.body)
+
+    [match] = Enum.filter(all_matches, fn x -> x["id"] == match_id end)
+    game = get_match_game(match)
+
+    teams = Enum.map(match["opponents"], fn x -> get_team_winrate(x["opponent"], match["tournament_id"], game) end)
+
+    w1 = Enum.fetch!(teams,0).winrate*(1-Enum.fetch!(teams,1).winrate)
+    w2 = Enum.fetch!(teams,1).winrate*(1-Enum.fetch!(teams,0).winrate)
+    p1 = w1 * 100 / (w1 + w2)
+    p2 = w2  * 100/ (w2 + w1)
+
+    %{Enum.fetch!(teams,0).team_name => p1, Enum.fetch!(teams,1).team_name => p2}
+  end
+
+  def get_match_game(match) do
+    case match["videogame"]["id"] do
+      1 ->
+        "lol"
+      4 ->
+        "dota2"
+      14 ->
+        "ow"
+    end
+  end
+
+  def get_team_winrate(team, tournament_id, game) do
+    response = HTTPotion.get "https://api.pandascore.co/#{game}/matches.json?token=#{Application.fetch_env!(:panda, :api_key)}&filter[tournament_id]=#{tournament_id}"
+    {:ok, all_matches} = Poison.decode(response.body)
+
+    team_matches = Enum.filter(all_matches, fn x -> is_team_in_match(team["id"], x) end)
+    total = Enum.reduce(team_matches, 0, fn x, acc -> acc + Enum.count(x["games"]) end)
+    wins = Enum.reduce(team_matches, 0, fn x, acc -> acc + Enum.count(x["games"], fn y -> y["winner"]["id"] == team["id"] end) end)
+    %{:team_name => team["name"], :team_id => team["id"], :winrate =>  wins/total}
+  end
+
+  def is_team_in_match(team_id, match) do
+    Enum.any?(match["opponents"], fn x -> x["opponent"]["id"] == team_id end)
   end
 
 end
