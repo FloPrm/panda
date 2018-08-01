@@ -11,4 +11,8 @@ defmodule PandaTest do
     assert Map.values(Panda.odds_for_match(match_id))
       |> Enum.reduce(0, fn x, acc -> acc + x end) == 100
   end
+
+  test "Basic Odds on non existing match" do
+    assert Panda.odds_for_match(0) == "No data for this match"
+  end
 end

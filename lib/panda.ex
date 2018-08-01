@@ -43,22 +43,28 @@ defmodule Panda do
     response = HTTPotion.get "https://api.pandascore.co/matches/upcoming.json?token=#{Application.fetch_env!(:panda, :api_key)}"
     {:ok, all_matches} = Poison.decode(response.body)
 
-    [match] = Enum.filter(all_matches, fn x -> x["id"] == match_id end)
-    videogame = get_match_videogame(match)
+    filter =  Enum.filter(all_matches, fn x -> x["id"] == match_id end)
+    if filter != [] do
+      [match] = filter
 
-    previous_matches = get_previous_matches(match["tournament_id"], videogame)
+      videogame = get_match_videogame(match)
 
-    teams =
-      match["opponents"]
-      |> Enum.map(&async_get_team_winrate(&1["opponent"], previous_matches))
-      |> Enum.map(fn(_) -> get_result() end)
+      previous_matches = get_previous_matches(match["tournament_id"], videogame)
 
-    w1 = Enum.fetch!(teams,0).winrate*(1-Enum.fetch!(teams,1).winrate)
-    w2 = Enum.fetch!(teams,1).winrate*(1-Enum.fetch!(teams,0).winrate)
-    p1 = w1 * 100 / (w1 + w2)
-    p2 = w2  * 100/ (w2 + w1)
+      teams =
+        match["opponents"]
+        |> Enum.map(&async_get_team_winrate(&1["opponent"], previous_matches))
+        |> Enum.map(fn(_) -> get_result() end)
 
-    %{Enum.fetch!(teams,0).team_name => p1, Enum.fetch!(teams,1).team_name => p2}
+      w1 = Enum.fetch!(teams,0).winrate*(1-Enum.fetch!(teams,1).winrate)
+      w2 = Enum.fetch!(teams,1).winrate*(1-Enum.fetch!(teams,0).winrate)
+      p1 = w1 * 100 / (w1 + w2)
+      p2 = w2  * 100/ (w2 + w1)
+
+      %{Enum.fetch!(teams,0).team_name => p1, Enum.fetch!(teams,1).team_name => p2}
+    else
+      "No data for this match"
+    end
   end
 
   def get_match_videogame(match) do
