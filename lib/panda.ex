@@ -44,9 +44,14 @@ defmodule Panda do
     {:ok, all_matches} = Poison.decode(response.body)
 
     [match] = Enum.filter(all_matches, fn x -> x["id"] == match_id end)
-    game = get_match_game(match)
+    videogame = get_match_videogame(match)
 
-    teams = Enum.map(match["opponents"], fn x -> get_team_winrate(x["opponent"], match["tournament_id"], game) end)
+    previous_matches = get_previous_matches(match["tournament_id"], videogame)
+
+    teams =
+      match["opponents"]
+      |> Enum.map(&async_get_team_winrate(&1["opponent"], previous_matches))
+      |> Enum.map(fn(_) -> get_result() end)
 
     w1 = Enum.fetch!(teams,0).winrate*(1-Enum.fetch!(teams,1).winrate)
     w2 = Enum.fetch!(teams,1).winrate*(1-Enum.fetch!(teams,0).winrate)
@@ -56,7 +61,7 @@ defmodule Panda do
     %{Enum.fetch!(teams,0).team_name => p1, Enum.fetch!(teams,1).team_name => p2}
   end
 
-  def get_match_game(match) do
+  def get_match_videogame(match) do
     case match["videogame"]["id"] do
       1 ->
         "lol"
@@ -67,14 +72,30 @@ defmodule Panda do
     end
   end
 
-  def get_team_winrate(team, tournament_id, game) do
-    response = HTTPotion.get "https://api.pandascore.co/#{game}/matches.json?token=#{Application.fetch_env!(:panda, :api_key)}&filter[tournament_id]=#{tournament_id}"
+  def get_previous_matches(tournament_id, videogame) do
+    response = HTTPotion.get "https://api.pandascore.co/#{videogame}/matches.json?token=#{Application.fetch_env!(:panda, :api_key)}&filter[tournament_id]=#{tournament_id}"
     {:ok, all_matches} = Poison.decode(response.body)
+    all_matches
+  end
 
+  def get_team_winrate(team, all_matches) do
     team_matches = Enum.filter(all_matches, fn x -> is_team_in_match(team["id"], x) end)
     total = Enum.reduce(team_matches, 0, fn x, acc -> acc + Enum.count(x["games"]) end)
     wins = Enum.reduce(team_matches, 0, fn x, acc -> acc + Enum.count(x["games"], fn y -> y["winner"]["id"] == team["id"] end) end)
     %{:team_name => team["name"], :team_id => team["id"], :winrate =>  wins/total}
+  end
+
+  def async_get_team_winrate(team, previous_matches) do
+    caller = self()
+    spawn(fn ->
+      send(caller, {:result, get_team_winrate(team, previous_matches)})
+    end)
+  end
+
+  def get_result do
+    receive do
+      {:result, result} -> result
+    end
   end
 
   def is_team_in_match(team_id, match) do
